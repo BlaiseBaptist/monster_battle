@@ -5,3 +5,4 @@ authors = ["Blaise Baptist <blaise.baptist@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+pad = "0.1"

@@ -1,42 +1,27 @@
-/*
-        todo
-*   give team name and print it
-*   level
-*   player
-*   main screen
-*   pvc
-*   pvp
-*   money
-*   save
-*   make more simple monsters
-*   buy more monsters
-*   monster ability
-*   inventory
-*   items
-*   buy items
-*   make more complated monsters
-*   GRAFICS!
-*
-
-*/
-
+use pad::{PadStr, Alignment};
 trait Monster {
-    fn shout(&self);
+    fn shout(&self)-> String;
     fn attack(&self, other: &mut Monster, round: i32);
-    fn hurt(&mut self, a: i32);
+    fn hurt(&mut self, a: i32, round: i32);
     fn is_dead(&self) -> bool;
+    fn star_check(&mut self);
+    fn special(&self, round: i32)->bool;
 }
 struct Ninja {
     health: i32,
     attack: i32,
     wait: i32,
     name: String,
+    level: i32,
+    stars: i32,
 }
 struct Golem {
     health: i32,
     attack: i32,
     wait: i32,
     name: String,
+    level: i32,
+    stars: i32,
 }
 struct Team {
     monsters: Vec<Box<Monster>>,
@@ -59,13 +44,6 @@ impl Team {
         }
         return false;
     }
-    fn print(&self) {
-        for (n, m) in self.monsters.iter().enumerate() {
-            print!("{}'s monster {} is a ",self.name, n + 1);
-            m.shout();
-        }
-        println!();
-    }
     fn attack(&self, other: &mut Team, round: i32) {
         for m in &self.monsters {
             m.attack(&mut *other.monsters[0], round);
@@ -75,10 +53,12 @@ impl Team {
     }
 }
 impl Ninja {
-    fn new(name: &str) -> Ninja {
+    fn new(name: &str, level: i32) -> Ninja {
         Ninja {
-            health: 1,
-            attack: 5,
+            stars: 3,
+            level: level,
+            health: (level*1),
+            attack: (level*5),
             wait: 1,
             name: name.to_string(),
         }
@@ -86,6 +66,11 @@ impl Ninja {
 }
 
 impl Monster for Ninja {
+    fn star_check(&mut self) {
+        if self.level > self.stars * 10 {
+            self.level = self.stars * 10;
+        }
+    }
     fn is_dead(&self) -> bool {
         if self.health <= 0 {
             return true;
@@ -93,30 +78,48 @@ impl Monster for Ninja {
             return false;
         }
     }
-    fn shout(&self) {
-        println!("Ninja {} ({})", self.name, self.health);
+    fn shout(&self)->String {
+        format!("Ninja {} h:({}), a:({}), l({})", self.name, self.health, self.attack, self.level)
     }
-    fn hurt(&mut self, a: i32) {
-        self.health -= a;
+    fn hurt(&mut self, a: i32, round: i32) {
+        if !self.special(round){
+            self.health -= a;
+        }
     }
     fn attack(&self, other: &mut Monster, round: i32) {
         if round%self.wait == 0{
-            other.hurt(self.attack);
+            other.hurt(self.attack, round);
         }
     }
+    fn special (&self, round: i32)->bool{
+        if round%self.wait == 0{
+            if 3 % (self.wait + round%self.wait) == 0 {
+                println!("ninja {} is cloaked! no damage", self.name);
+                return true;
+            }
+        }
+        return false;
+    }
+        
 }
-
 impl Golem {
-    fn new(name: &str) -> Golem {
+    fn new(name: &str, level: i32) -> Golem {
         Golem {
-            health: 50,
-            attack: 10,
-            wait: 15,
+            stars: 3,
+            level: level,
+            health: (level*55),
+            attack: (level*7),
+            wait: 6,
             name: name.to_string(),
         }
     }
 }
 impl Monster for Golem {
+    fn star_check(&mut self) {
+        if self.level > self.stars * 10 {
+            self.level = self.stars * 10;
+        }
+    }
     fn is_dead(&self) -> bool {
         if self.health <= 0 {
             return true;
@@ -124,47 +127,67 @@ impl Monster for Golem {
             return false;
         }
     }
-    fn shout(&self) {
-        println!("Golem {} ({})", self.name, self.health);
+    fn shout(&self)->String {
+        format!("Golem {} h:({}), a:({}), l:({})", self.name, self.health, self.attack, self.level)
     }
-    fn hurt(&mut self, a: i32) {
+    fn hurt(&mut self, a: i32, round: i32) {
         self.health -= a;
     }
     fn attack(&self, other: &mut Monster, round: i32) {
         if round%self.wait == 0{
-            other.hurt(self.attack);
+            other.hurt(self.attack, round);
         }
     }
+    fn special(&self, round: i32)->bool{return true;}
 }
 
 fn main() {
-    let mut team1 = Team::new("team1".to_string());
-    let mut team2 = Team::new("team2".to_string());
+    let mut team1 = Team::new("your team".to_string());
+    let mut team2 = Team::new("enemy".to_string());
     let mut round = 0;
-    team1.monsters.push(Box::new(Golem::new("teddy")));
-    team1.monsters.push(Box::new(Ninja::new("blaise")));
-    team1.monsters.push(Box::new(Ninja::new("marcus")));
-    team1.monsters.push(Box::new(Ninja::new("clara")));
-    team1.monsters.push(Box::new(Ninja::new("bea")));
+    team1.monsters.push(Box::new(Ninja::new("teddy", 30)));
+    team1.monsters.push(Box::new(Ninja::new("blaise", 30)));
+    team1.monsters.push(Box::new(Ninja::new("marcus",30)));
+    team1.monsters.push(Box::new(Ninja::new("clara", 30)));
+    team1.monsters.push(Box::new(Ninja::new("bea", 30)));
 
-    team2.monsters.push(Box::new(Golem::new("teddy1")));
-    team2.monsters.push(Box::new(Golem::new("teddy2")));
-    team2.monsters.push(Box::new(Golem::new("teddy3")));
-    team2.monsters.push(Box::new(Golem::new("teddy4")));
-    team2.monsters.push(Box::new(Golem::new("teddy5")));
-    team2.monsters.push(Box::new(Golem::new("teddy6")));
-    team2.monsters.push(Box::new(Golem::new("teddy7")));
-    team2.monsters.push(Box::new(Golem::new("teddy8")));
-    team2.monsters.push(Box::new(Golem::new("teddy9")));
-    team2.monsters.push(Box::new(Golem::new("teddy10")));
-    team1.print();
-    team2.print();
+    team2.monsters.push(Box::new(Golem::new("teddy1",30)));
+    team2.monsters.push(Box::new(Golem::new("teddy2",30)));
+    team2.monsters.push(Box::new(Golem::new("teddy3",30)));
+    team2.monsters.push(Box::new(Golem::new("teddy4",30)));
+    team2.monsters.push(Box::new(Golem::new("teddy5",30)));
+    print(&team1, &team2);
     while !team1.is_dead() && !team2.is_dead() {
         round += 1;
-        println!("round {}", round);
+        println!("                                     round {}", round);
         team1.attack(&mut team2, round);
         team2.attack(&mut team1, round);
-        team1.print();
-        team2.print();
+        print(&team1, &team2);
+    }
+    if team1.is_dead(){
+        println!("you lose");
+    }
+    else{
+        println!("you win");
+    }
+}
+fn print(team1: &Team, team2: &Team) {
+    println!("{}{}", team1.name.pad(40, ' ', Alignment::Left, true), team2.name.pad(40, ' ', Alignment::Right, true));
+    let mut i = 0;
+    loop {
+        if i < team1.monsters.len(){
+            print!("{}",team1.monsters[i].shout().pad(40, ' ', Alignment::Left, true));
+        }
+        else { 
+            print!("                                        ");
+        }
+        if i < team2.monsters.len(){
+            print!("{}",team2.monsters[i].shout().pad(40, ' ', Alignment::Right, true));
+        }
+        println!();
+        if i > team1.monsters.len() && i > team2.monsters.len() {
+            return;
+        }
+        i+=1;
     }
 }
