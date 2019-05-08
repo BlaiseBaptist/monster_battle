@@ -1,4 +1,5 @@
 use pad::{Alignment, PadStr};
+use std::io;
 use std::sync::mpsc::channel;
 use std::thread;
 trait Monster {
@@ -146,21 +147,92 @@ impl Monster for Golem {
 }
 
 fn main() {
-    let mut team1 = Team::new("your team".to_string());
-    let mut team2 = Team::new("enemy".to_string());
+    let (client_s, server_r) = channel();
+    let (server_s, client_r) = channel();
+    thread::spawn(move || loop {
+        let op = get_data("1: battle\n2: buy monster".to_string(),1,2);
+        if op == 2 {
+            client_s.send((op, get_data("1: Ninja\n2: Golem".to_string(),1,2)));
+        }
+        else {
+            client_s.send((op, 0));
+            println!("{}",client_r.recv().unwrap());
+        }
+        print!("{}", client_r.recv().unwrap());
+        wait_for_key();
+        print!("{}[2J", 27 as char);
+    });
+    let mut team1 = Team::new("you".to_string());
+    loop {
+        let (op, data) = server_r.recv().unwrap();
+        println!("op: {}, data: {}", op, data);
+        let result = 
+        match op {
+            1 => {
+                let mut team2 = set_up();
+                if !team1.monsters.len() == 0 {
+                    server_s.send(print(&team1, &team2));
+                    if battle(&mut team1, &mut team2) {
+                        "you lose"
+                    } else {
+                        "you win"
+                    }
+                }
+                else {
+                    server_s.send("you lose".to_string());
+                    "you have no monsters, go buy some"
+                }
+            }
+            2 => { 
+                if team1.monsters.len() != 5 {
+                    match data {
+                        1 => team1.monsters.push(Box::new(Ninja::new(30))),
+                        2 => team1.monsters.push(Box::new(Ninja::new(30))),
+                        _ => {},
+                        };
+                    "added"
+                }
+                else {
+                    "you have 5 please battle"
+                }
+            }
+            _ => "HOW!?!?!?!"
+        };
+        server_s.send(result.to_string());
+    }
+}
+fn wait_for_key() {
+    let mut nothing = String::new();
+    println!(" (press enter to continue)");
+    io::stdin().read_line(&mut nothing);
+}
+fn get_data(message: String, lb: u32, ub: u32) -> u32 {
+    loop {
+        println!("{}", message);
+        let mut snum = String::new();
+        io::stdin().read_line(&mut snum).expect("fail");
+        let snum: u32 = match snum.trim().parse() {
+            Ok(snum) => snum,
+            Err(_) => continue,
+        };
+        if snum > ub || snum < lb {
+            println!("bad choice, choose between {} and {}!!", lb, ub);
+            continue;
+        }
+        return snum;
+    }
+}
+fn set_up() -> (Team) {
+    let mut team = Team::new("enemy".to_string());
+    team.monsters.push(Box::new(Ninja::new(30)));
+    team.monsters.push(Box::new(Ninja::new(30)));
+    team.monsters.push(Box::new(Ninja::new(30)));
+    team.monsters.push(Box::new(Ninja::new(30)));
+    team.monsters.push(Box::new(Ninja::new(30)));
+    (team)
+}
+fn battle(mut team1: &mut Team, mut team2: &mut Team) -> bool {
     let mut round = 0;
-    team1.monsters.push(Box::new(Ninja::new(30)));
-    /*    team1.monsters.push(Box::new(Ninja::new(30)));
-        team1.monsters.push(Box::new(Ninja::new(30)));
-        team1.monsters.push(Box::new(Ninja::new(30)));
-        team1.monsters.push(Box::new(Ninja::new(30)));
-
-        team2.monsters.push(Box::new(Golem::new(30)));
-        team2.monsters.push(Box::new(Golem::new(30)));
-        team2.monsters.push(Box::new(Golem::new(30)));
-        team2.monsters.push(Box::new(Golem::new(30)));
-    */
-    team2.monsters.push(Box::new(Golem::new(30)));
     print(&team1, &team2);
     while !team1.is_dead() && !team2.is_dead() {
         round += 1;
@@ -169,41 +241,37 @@ fn main() {
         team2.attack(&mut team1, round);
         print(&team1, &team2);
     }
-    if team1.is_dead() {
-        println!("you lose");
-    } else {
-        println!("you win");
-    }
+    team1.is_dead()
 }
-fn print(team1: &Team, team2: &Team) {
-    println!(
+fn print(team1: &Team, team2: &Team)->String {
+    let mut print = String::new();
+    print.push_str(&format!(
         "{}{}",
         team1.name.pad(40, ' ', Alignment::Left, true),
         team2.name.pad(40, ' ', Alignment::Right, true)
-    );
+    ));
     let mut i = 0;
     loop {
         if i < team1.monsters.len() {
-            print!(
+            print.push_str(&format!(
                 "{}",
                 team1.monsters[i]
                     .shout()
                     .pad(40, ' ', Alignment::Left, true)
-            );
+            ));
         } else {
-            print!("                                        ");
+            print.push_str(&format!("{}","".pad(40, ' ', Alignment::Left, true)));
         }
         if i < team2.monsters.len() {
-            print!(
-                "{}",
+            print.push_str(&format!(
+                "{}\n",
                 team2.monsters[i]
                     .shout()
                     .pad(40, ' ', Alignment::Right, true)
-            );
+            ));
         }
-        println!();
         if i > team1.monsters.len() && i > team2.monsters.len() {
-            return;
+            return print;
         }
         i += 1;
     }
