@@ -3,12 +3,11 @@ extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
 use pad::{Alignment, PadStr};
-use std::io;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::{str, thread};
-trait Monster {
+trait Monster: Send {
     fn get_logic(&self) -> &Logic;
     fn get_mut_logic(&mut self) -> &mut Logic;
     fn shout(&self) -> String {
@@ -87,7 +86,7 @@ impl Logic {
             self.name, self.health, self.attack, self.level
         )
     }
-    fn hurt(&mut self, a: i32, round: i32) {
+    fn hurt(&mut self, a: i32, _round: i32) {
         self.health -= a;
     }
     fn attack(&self, other: &mut Monster, round: i32) {
@@ -117,7 +116,7 @@ impl Monster for Ninja {
     fn get_mut_logic(&mut self) -> &mut Logic {
         &mut self.logic
     }
-    fn special(&self, round: i32) -> bool {
+    fn special(&self, _round: i32) -> bool {
         return false;
     }
 }
@@ -141,7 +140,7 @@ impl Monster for Golem {
     fn get_mut_logic(&mut self) -> &mut Logic {
         &mut self.logic
     }
-    fn special(&self, round: i32) -> bool {
+    fn special(&self, _round: i32) -> bool {
         return false;
     }
 }
@@ -157,19 +156,19 @@ enum Response {
     AddMonster(Result<(), String>),
 }
 fn main() {
-    let (client_s, server_r) = channel();
-    let mut team1 = Team::new("you".to_string());
     let listener = TcpListener::bind("0.0.0.0:55555").expect("Could not bind");
     for stream in listener.incoming() {
         match stream {
-            Err(e) => continue,
+            Err(_e) => continue,
             Ok(stream) => {
+                let (client_s, server_r) = channel();
                 let (server_s, client_r) = channel();
                 create_client_proxy(stream, client_s, client_r);
-                loop {
+                let mut team1 = Team::new("you".to_string());
+                thread::spawn(move || loop {
                     let request = server_r.recv().unwrap();
                     server_s.send(process_request(request, &mut team1)).unwrap();
-                }
+                });
             }
         }
     }
@@ -226,9 +225,9 @@ fn create_client_proxy(stream: TcpStream, send: Sender<Request>, recv: Receiver<
     let mut stream = BufReader::new(stream);
     thread::spawn(move || loop {
         let mut data = Vec::new();
-        stream.read_until(b'\n', &mut data);
+        stream.read_until(b'\n', &mut data).unwrap();
         let imput: Request = serde_json::from_slice(&data).unwrap();
-        send.send(imput);
+        send.send(imput).unwrap();
         let rres = recv.recv().unwrap();
         let res = serde_json::to_string(&rres).unwrap();
         write!(stream.get_mut(), "{}\n", res).unwrap();
