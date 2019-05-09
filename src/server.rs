@@ -1,7 +1,13 @@
+#[macro_use]
+extern crate serde_derive;
+extern crate serde;
+extern crate serde_json;
 use pad::{Alignment, PadStr};
 use std::io;
-use std::sync::mpsc::channel;
-use std::thread;
+use std::io::{BufRead, BufReader, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::{str, thread};
 trait Monster {
     fn get_logic(&self) -> &Logic;
     fn get_mut_logic(&mut self) -> &mut Logic;
@@ -112,12 +118,6 @@ impl Monster for Ninja {
         &mut self.logic
     }
     fn special(&self, round: i32) -> bool {
-        if round % self.logic.wait == 0 {
-            if 3 % (self.logic.wait + round % self.logic.wait) == 0 {
-                println!("{} is cloaked!", self.logic.name);
-                return true;
-            }
-        }
         return false;
     }
 }
@@ -146,95 +146,69 @@ impl Monster for Golem {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 enum Request {
     Battle,
     AddMonster(u32),
 }
-
+#[derive(Serialize, Deserialize)]
+enum Response {
+    Battle(Result<bool, String>),
+    AddMonster(Result<(), String>),
+}
 fn main() {
     let (client_s, server_r) = channel();
-    let (server_s, client_r) = channel();
-    thread::spawn(move || loop {
-        let op = get_data("1: battle\n2: buy monster".to_string(), 1, 2);
-        if op == 2 {
-            client_s.send(Request::AddMonster(get_data(
-                "1: Ninja\n2: Golem".to_string(),
-                1,
-                2,
-            )));
-        } else {
-            client_s.send(Request::Battle).unwrap();
-            println!("{}", client_r.recv().unwrap());
-        }
-        print!("{}", client_r.recv().unwrap());
-        wait_for_key();
-        print!("{}[2J", 27 as char);
-    });
     let mut team1 = Team::new("you".to_string());
-    loop {
-        let request = server_r.recv().unwrap();
-        let result = match request {
-            Request::Battle => {
-                let mut team2 = set_up();
-                if team1.monsters.len() != 0 {
-                    server_s.send(display(&team1, &team2)).unwrap();
-                    if battle(&mut team1, &mut team2) {
-                        "you lose"
-                    } else {
-                        "you win"
-                    }
-                } else {
-                    server_s.send("you lose".to_string()).unwrap();
-                    "you have no monsters, go buy some"
+    let listener = TcpListener::bind("0.0.0.0:55555").expect("Could not bind");
+    for stream in listener.incoming() {
+        match stream {
+            Err(e) => continue,
+            Ok(stream) => {
+                let (server_s, client_r) = channel();
+                create_client_proxy(stream, client_s, client_r);
+                loop {
+                    let request = server_r.recv().unwrap();
+                    server_s.send(process_request(request, &mut team1)).unwrap();
                 }
             }
-            Request::AddMonster(data) => {
-                if team1.monsters.len() != 5 {
-                    match data {
-                        1 => team1.monsters.push(Box::new(Ninja::new(30))),
-                        2 => team1.monsters.push(Box::new(Golem::new(30))),
-                        _ => {}
-                    };
-                    let teamn = Team::new("".to_string());
-                    println!("{}", display(&team1, &teamn));
-                    "added"
-                } else {
-                    "you have 5 please battle"
-                }
-            }
-        };
-        server_s.send(result.to_string()).unwrap();
+        }
     }
 }
-fn wait_for_key() {
-    let mut nothing = String::new();
-    println!(" (press enter to continue)");
-    io::stdin().read_line(&mut nothing).unwrap();
-}
-fn get_data(message: String, lb: u32, ub: u32) -> u32 {
-    loop {
-        println!("{}", message);
-        let mut snum = String::new();
-        io::stdin().read_line(&mut snum).expect("fail");
-        let snum: u32 = match snum.trim().parse() {
-            Ok(snum) => snum,
-            Err(_) => continue,
-        };
-        if snum > ub || snum < lb {
-            println!("bad choice, choose between {} and {}!!", lb, ub);
-            continue;
+fn process_request(request: Request, mut team1: &mut Team) -> Response {
+    match request {
+        Request::Battle => {
+            let mut team2 = set_up();
+            if team1.monsters.len() != 0 {
+                if battle(&mut team1, &mut team2) {
+                    Response::Battle(Ok(false))
+                } else {
+                    Response::Battle(Ok(true))
+                }
+            } else {
+                Response::Battle(Err("you have no monsters go buy some!".to_string()))
+            }
         }
-        println!("num: {}", snum);
-        return snum;
+        Request::AddMonster(data) => {
+            if team1.monsters.len() != 5 {
+                match data {
+                    1 => team1.monsters.push(Box::new(Ninja::new(1))),
+                    2 => team1.monsters.push(Box::new(Golem::new(1))),
+                    _ => {}
+                };
+                Response::AddMonster(Ok(()))
+            } else {
+                Response::AddMonster(Err("you have 5 please battle".to_string()))
+            }
+        }
     }
 }
 fn set_up() -> (Team) {
     let mut team = Team::new("enemy".to_string());
-    team.monsters.push(Box::new(Ninja::new(30)));
-    team.monsters.push(Box::new(Ninja::new(30)));
-    team.monsters.push(Box::new(Ninja::new(30)));
-    team.monsters.push(Box::new(Ninja::new(30)));
-    team.monsters.push(Box::new(Ninja::new(30)));
+    team.monsters.push(Box::new(Ninja::new(1)));
+    team.monsters.push(Box::new(Ninja::new(1)));
+    team.monsters.push(Box::new(Ninja::new(1)));
+    team.monsters.push(Box::new(Ninja::new(1)));
+    team.monsters.push(Box::new(Ninja::new(1)));
     (team)
 }
 fn battle(mut team1: &mut Team, mut team2: &mut Team) -> bool {
@@ -242,12 +216,23 @@ fn battle(mut team1: &mut Team, mut team2: &mut Team) -> bool {
     display(&team1, &team2);
     while !team1.is_dead() && !team2.is_dead() {
         round += 1;
-        println!("                                     round {}", round);
         team1.attack(&mut team2, round);
         team2.attack(&mut team1, round);
         display(&team1, &team2);
     }
     team1.is_dead()
+}
+fn create_client_proxy(stream: TcpStream, send: Sender<Request>, recv: Receiver<Response>) {
+    let mut stream = BufReader::new(stream);
+    thread::spawn(move || loop {
+        let mut data = Vec::new();
+        stream.read_until(b'\n', &mut data);
+        let imput: Request = serde_json::from_slice(&data).unwrap();
+        send.send(imput);
+        let rres = recv.recv().unwrap();
+        let res = serde_json::to_string(&rres).unwrap();
+        write!(stream.get_mut(), "{}\n", res).unwrap();
+    });
 }
 fn display(team1: &Team, team2: &Team) -> String {
     let mut print = String::new();
@@ -258,6 +243,11 @@ fn display(team1: &Team, team2: &Team) -> String {
     ));
     let mut i = 0;
     loop {
+        print.push_str(&format!(
+            "round: {}{}",
+            (i + 1),
+            "".pad(40, ' ', Alignment::Left, true)
+        ));
         if i < team1.monsters.len() {
             print.push_str(&format!(
                 "{}",
