@@ -14,7 +14,7 @@ enum Request {
     AddMonster(u32),
 }
 fn main() {
-    let mut stream = TcpStream::connect("10.0.1.99:55555").expect("fail");
+    let mut stream = TcpStream::connect("10.0.1.99:4444").expect("fail");
     loop {
         let op = get_data("1: battle\n2: buy monster".to_string(), 1, 2);
         let rdata = if op == 2 {
@@ -24,14 +24,14 @@ fn main() {
         };
         let data = serde_json::to_string(&rdata).unwrap();
         stream.write_all(data.as_bytes()).expect("fail");
-        stream.write(&[b'\n']).unwrap();
+        stream.write_all(&[b'\n']).unwrap();
         let mut reader = BufReader::new(&stream);
         let mut buffer: Vec<u8> = Vec::new();
         reader.read_until(b'\n', &mut buffer).unwrap();
         let input = str::from_utf8(&buffer).expect("fail");
         println!("{}", input);
         wait_for_key();
-        //print!("{}[2J", 27 as char);
+        print!("{}[2J", 27 as char);
     }
 }
 fn wait_for_key() {

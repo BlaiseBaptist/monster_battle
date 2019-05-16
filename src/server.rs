@@ -2,10 +2,14 @@
 extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
+
 use pad::{Alignment, PadStr};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::MutexGuard;
+use std::sync::{Arc, Mutex};
 use std::{str, thread};
 trait Monster: Send {
     fn get_logic(&self) -> &Logic;
@@ -37,6 +41,13 @@ struct Logic {
     level: i32,
     stars: i32,
 }
+struct Player {
+    team: Team,
+    money: u32,
+    name: String,
+    level: u32,
+    id: u128,
+}
 struct Ninja {
     logic: Logic,
 }
@@ -45,21 +56,18 @@ struct Golem {
 }
 struct Team {
     monsters: Vec<Box<Monster>>,
-    name: String,
 }
 impl Team {
-    fn new(name: String) -> Team {
+    fn new() -> Team {
         Team {
             monsters: Vec::new(),
-            name: name,
         }
     }
     fn cleanup(&mut self) {
         self.monsters.retain(|m| !m.is_dead());
     }
-
     fn is_dead(&self) -> bool {
-        self.monsters.len() == 0
+        self.monsters.is_empty()
     }
     fn attack(&self, other: &mut Team, round: i32) {
         for m in &self.monsters {
@@ -68,6 +76,17 @@ impl Team {
             if other.is_dead() {
                 return;
             }
+        }
+    }
+}
+impl Player {
+    fn new(name: String, money: u32, id: u128) -> Player {
+        Player {
+            team: Team::new(),
+            money,
+            name,
+            id,
+            level: 1,
         }
     }
 }
@@ -99,7 +118,7 @@ impl Ninja {
     fn new(level: i32) -> Ninja {
         let logic = Logic {
             stars: 3,
-            level: level,
+            level,
             health: (level * 1),
             attack: (level * 5),
             wait: 1,
@@ -117,14 +136,14 @@ impl Monster for Ninja {
         &mut self.logic
     }
     fn special(&self, _round: i32) -> bool {
-        return false;
+        false
     }
 }
 impl Golem {
     fn new(level: i32) -> Golem {
         let logic = Logic {
             stars: 3,
-            level: level,
+            level,
             health: (level * 55),
             attack: (level * 7),
             wait: 6,
@@ -141,7 +160,7 @@ impl Monster for Golem {
         &mut self.logic
     }
     fn special(&self, _round: i32) -> bool {
-        return false;
+        false
     }
 }
 
@@ -156,7 +175,9 @@ enum Response {
     AddMonster(Result<(), String>),
 }
 fn main() {
-    let listener = TcpListener::bind("0.0.0.0:55555").expect("Could not bind");
+    let listener = TcpListener::bind("0.0.0.0:4444").expect("Could not bind");
+    let mut players = HashMap::new();
+    let mut next_id: u128 = 1;
     for stream in listener.incoming() {
         match stream {
             Err(_e) => continue,
@@ -164,21 +185,27 @@ fn main() {
                 let (client_s, server_r) = channel();
                 let (server_s, client_r) = channel();
                 create_client_proxy(stream, client_s, client_r);
-                let mut team1 = Team::new("you".to_string());
+                let player = Arc::new(Mutex::new(Player::new("blaise".to_string(), 100, next_id)));
+                let player_clone = Arc::clone(&player);
+                players.insert(next_id, player);
                 thread::spawn(move || loop {
                     let request = server_r.recv().unwrap();
-                    server_s.send(process_request(request, &mut team1)).unwrap();
+                    let player_clone = player_clone.lock().unwrap();
+                    server_s
+                        .send(process_request(request, player_clone))
+                        .unwrap();
                 });
             }
         }
+        next_id += 1;
     }
 }
-fn process_request(request: Request, mut team1: &mut Team) -> Response {
+fn process_request(request: Request, mut player: MutexGuard<Player>) -> Response {
     match request {
         Request::Battle => {
             let mut team2 = set_up();
-            if team1.monsters.len() != 0 {
-                if battle(&mut team1, &mut team2) {
+            if !player.team.monsters.is_empty() {
+                if battle(&mut player.team, &mut team2) {
                     Response::Battle(Ok(false))
                 } else {
                     Response::Battle(Ok(true))
@@ -188,10 +215,10 @@ fn process_request(request: Request, mut team1: &mut Team) -> Response {
             }
         }
         Request::AddMonster(data) => {
-            if team1.monsters.len() != 5 {
+            if player.team.monsters.len() != 5 {
                 match data {
-                    1 => team1.monsters.push(Box::new(Ninja::new(1))),
-                    2 => team1.monsters.push(Box::new(Golem::new(1))),
+                    1 => player.team.monsters.push(Box::new(Ninja::new(1))),
+                    2 => player.team.monsters.push(Box::new(Golem::new(1))),
                     _ => {}
                 };
                 Response::AddMonster(Ok(()))
@@ -202,12 +229,12 @@ fn process_request(request: Request, mut team1: &mut Team) -> Response {
     }
 }
 fn set_up() -> (Team) {
-    let mut team = Team::new("enemy".to_string());
-    team.monsters.push(Box::new(Ninja::new(1)));
-    team.monsters.push(Box::new(Ninja::new(1)));
-    team.monsters.push(Box::new(Ninja::new(1)));
-    team.monsters.push(Box::new(Ninja::new(1)));
-    team.monsters.push(Box::new(Ninja::new(1)));
+    let mut team = Team::new();
+    team.monsters.push(Box::new(Ninja::new(30)));
+    team.monsters.push(Box::new(Ninja::new(30)));
+    team.monsters.push(Box::new(Ninja::new(30)));
+    team.monsters.push(Box::new(Ninja::new(30)));
+    team.monsters.push(Box::new(Ninja::new(30)));
     (team)
 }
 fn battle(mut team1: &mut Team, mut team2: &mut Team) -> bool {
@@ -230,16 +257,11 @@ fn create_client_proxy(stream: TcpStream, send: Sender<Request>, recv: Receiver<
         send.send(imput).unwrap();
         let rres = recv.recv().unwrap();
         let res = serde_json::to_string(&rres).unwrap();
-        write!(stream.get_mut(), "{}\n", res).unwrap();
+        writeln!(stream.get_mut(), "{}", res).unwrap();
     });
 }
 fn display(team1: &Team, team2: &Team) -> String {
     let mut print = String::new();
-    print.push_str(&format!(
-        "{}{}",
-        team1.name.pad(40, ' ', Alignment::Left, true),
-        team2.name.pad(40, ' ', Alignment::Right, true)
-    ));
     let mut i = 0;
     loop {
         print.push_str(&format!(
@@ -248,14 +270,13 @@ fn display(team1: &Team, team2: &Team) -> String {
             "".pad(40, ' ', Alignment::Left, true)
         ));
         if i < team1.monsters.len() {
-            print.push_str(&format!(
-                "{}",
-                team1.monsters[i]
+            print.push_str(
+                &team1.monsters[i]
                     .shout()
-                    .pad(40, ' ', Alignment::Left, true)
-            ));
+                    .pad(40, ' ', Alignment::Left, true),
+            );
         } else {
-            print.push_str(&format!("{}", "".pad(40, ' ', Alignment::Left, true)));
+            print.push_str(&"".pad(40, ' ', Alignment::Left, true));
         }
         if i < team2.monsters.len() {
             print.push_str(&format!(
